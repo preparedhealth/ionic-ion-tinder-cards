@@ -23,6 +23,59 @@
     }
   }
 
+var SwipeableCardController = ionic.views.View.inherit({
+    initialize: function(opts) {
+      this.cards = [];
+
+      var ratio = window.innerWidth / window.innerHeight;
+
+      this.maxWidth = window.innerWidth - (opts.cardGutterWidth || 0);
+      this.maxHeight = opts.height || 300;
+      this.cardGutterWidth = opts.cardGutterWidth || 10;
+      this.cardPopInDuration = opts.cardPopInDuration || 400;
+      this.cardAnimation = opts.cardAnimation || 'pop-in';
+    },
+    /**
+     * Push a new card onto the stack.
+     */
+    pushCard: function(card) {
+      var self = this;
+
+      this.cards.push(card);
+      this.beforeCardShow(card);
+
+      card.transitionIn(this.cardAnimation);
+      setTimeout(function() {
+        card.disableTransition(self.cardAnimation);
+      }, this.cardPopInDuration + 100);
+    },
+    /**
+     * Set up a new card before it shows.
+     */
+    beforeCardShow: function() {
+      var nextCard = this.cards[this.cards.length-1];
+      if(!nextCard) return;
+
+      // Calculate the top left of a default card, as a translated pos
+      var topLeft = window.innerHeight / 2 - this.maxHeight/2;
+      console.log(window.innerHeight, this.maxHeight);
+
+      var cardOffset = Math.min(this.cards.length, 3) * 5;
+
+      // Move each card 5 pixels down to give a nice stacking effect (max of 3 stacked)
+      nextCard.setPopInDuration(this.cardPopInDuration);
+      nextCard.setZIndex(this.cards.length);
+    },
+    /**
+     * Pop a card from the stack
+     */
+    popCard: function() {
+      var card = this.cards.shift();
+      card.swipe();
+      return card;
+    }
+  });
+
   var SwipeableCardView = ionic.views.View.inherit({
     /**
      * Initialize a card with the given options.
@@ -134,42 +187,26 @@
     transitionOut: function(e) {
       var self = this;
 
-      if(this.isUnderThreshold()) {
-        self.onSnapBack(this.x, this.y, this.rotationAngle);
-        return;
-      }
+     /* if(this.y < 0) {
+        this.el.style[TRANSITION] = '-webkit-transform 0.2s ease-in-out';
+        this.el.style[ionic.CSS.TRANSFORM] = 'translate3d(' + this.x + ',' + (this.startY) + 'px, 0)';
+        setTimeout(function() {
+          self.el.style[TRANSITION] = 'none';
+        }, 200);
+      } else {*/
+        // Fly out
+        var rotateTo = (this.rotationAngle + (this.rotationDirection * 0.6)) || (Math.random() * 0.4);
+        var duration = this.rotationAngle ? 0.2 : 0.5;
+        this.el.style[TRANSITION] = '-webkit-transform ' + duration + 's ease-in-out';
+        this.el.style[ionic.CSS.TRANSFORM] = 'translate3d(' + this.x + ',' + (window.innerHeight * 1.5) + 'px, 0) rotate(' + rotateTo + 'rad)';
+        this.onSwipeLeft && this.onSwipeLeft();
 
-      self.onTransitionOut(self.thresholdAmount);
-      
-      var angle = Math.atan(e.gesture.deltaX / e.gesture.deltaY);
+        // Trigger destroy after card has swiped out
+        setTimeout(function() {
+          self.onDestroy && self.onDestroy();
+        }, duration * 1000);
+      //}
 
-      var dir = this.thresholdAmount < 0 ? -1 : 1;
-      var targetX;
-      if(this.x > 0) {
-        targetX = (this.parentWidth / 2) + (this.width);
-      } else {
-        targetX = - (this.parentWidth + this.width);
-      }
-
-      // Target Y is just the "opposite" side of the triangle of targetX as the adjacent edge (sohcahtoa yo)
-      var targetY = targetX / Math.tan(angle);
-
-      // Fly out
-      var rotateTo = this.rotationAngle;//(this.rotationAngle this.rotationDirection * 0.2));// || (Math.random() * 0.4);
-
-      var duration = 0.3 - Math.min(Math.max(Math.abs(e.gesture.velocityX)/10, 0.05), 0.2);
-      
-      ionic.requestAnimationFrame(function() {
-        self.el.style.transform = self.el.style.webkitTransform = 'translate3d(' + targetX + 'px, ' + targetY + 'px,0) rotate(' + self.rotationAngle + 'rad)';
-        self.el.style.transition = self.el.style.webkitTransition = 'all ' + duration + 's ease-in-out';
-      });
-
-      //this.onSwipe && this.onSwipe();
-
-      // Trigger destroy after card has swiped out
-      setTimeout(function() {
-        self.onDestroy && self.onDestroy();
-      }, duration * 1000);
     },
 
     /**
@@ -235,13 +272,15 @@
 
       this.thresholdAmount = (this.x / (this.parentWidth/2));
 
-      var self = this;
+      //var self = this;
       setTimeout(function() {
-        self.onPartialSwipe(self.thresholdAmount);
+        //self.onPartialSwipe(self.thresholdAmount);
       });
     },
     _doDragEnd: function(e) {
-      this.transitionOut(e);
+        //this.transitionOut(e);
+        this.snapBack();
+        this.startX = this.startY = this.x = this.y = 0;
     }
   });
 
@@ -274,6 +313,7 @@
       scope: {
         onSwipeLeft: '&',
         onSwipeRight: '&',
+        onSwipe: '&',
         onTransitionLeft: '&',
         onTransitionRight: '&',
         onTransitionOut: '&',
@@ -281,8 +321,7 @@
         onSnapBack: '&',
         onDestroy: '&'
       },
-      compile: function(element, attr) {
-        return function($scope, $element, $attr, swipeCards) {
+      link: function($scope, $element, $attr, swipeCards) {
           var el = $element[0];
           var leftText = el.querySelector('.no-text');
           var rightText = el.querySelector('.yes-text');
@@ -296,7 +335,7 @@
             leftText: leftText,
             rightText: rightText,
             onPartialSwipe: function(amt) {
-              swipeCards.partial(amt);
+              /*swipeCards.partial(amt);
               var self = this;
               $timeout(function() {
                 if (amt < 0) {
@@ -307,6 +346,11 @@
                   if (self.rightText) self.rightText.style.opacity = fadeFn(amt);
                 }
                 $scope.onPartialSwipe({amt: amt});
+              });*/
+            },
+            onSwipe: function() {
+              $timeout(function() {
+                $scope.onSwipe();
               });
             },
             onSwipeRight: function() {
@@ -384,9 +428,8 @@
             },
           });
           $scope.$parent.swipeCard = swipeableCard;
-
+          swipeCards.swipeController.pushCard(swipeableCard);
         }
-      }
     }
   }])
 
@@ -437,6 +480,17 @@
           secondCard && bringCardUp(secondCard, amt, 4);
           thirdCard && bringCardUp(thirdCard, amt, 8);
         };
+
+        var swipeController = new SwipeableCardController({
+        });
+
+        $rootScope.$on('swipeCard.pop', function() {
+          swipeController.popCard();
+        });
+        $rootScope.$on('swipeCard.stop', function() {
+          swipeController.allowCard();
+        });
+        this.swipeController = swipeController;
       }]
     }
   }])
@@ -444,10 +498,10 @@
   .factory('TDCardDelegate', ['$rootScope', function($rootScope) {
     return {
       popCard: function($scope, isAnimated) {
-        $rootScope.$emit('tdCard.pop', isAnimated);
+        $rootScope.$emit('swipeCard.pop', isAnimated);
       },
       getSwipeableCard: function($scope) {
-        return $scope.swipeCard;
+        return $scope.$parent.swipeCard;
       }
     }
   }]);
